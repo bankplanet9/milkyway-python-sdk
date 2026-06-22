@@ -29,10 +29,11 @@ jobs:
         run: python -m pytest -q
 
   release:
-    # Auto-version on every push to main. semantic-release analyses the
-    # conventional commits, computes the next version, writes it into the package,
-    # builds the dist, and cuts a GitHub release + tag (which publish.yml then
-    # uploads to PyPI). No releasable commits (chore/docs/ci only) → no release.
+    # Auto-version on every push to main. semantic-release computes the next
+    # version, builds the dist, and cuts a GitHub release + tag. It then explicitly
+    # dispatches publish.yml for the new tag — a release created with GITHUB_TOKEN
+    # does NOT fire the `release: published` event, so we trigger the PyPI upload
+    # ourselves. No releasable commits (chore/docs/ci only) → no release.
     needs: build-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -62,3 +63,11 @@ jobs:
         run: npx --yes -p semantic-release -p @semantic-release/exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger PyPI publish for the new release
+        # prepareCmd builds dist/ only when a release happened, so this is our
+        # "did we release?" signal. publish.yml does the OIDC upload to PyPI.
+        if: hashFiles('dist/*.whl') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run publish.yml --repo "${{ github.repository }}" -f tag="$(git describe --tags --abbrev=0)"
