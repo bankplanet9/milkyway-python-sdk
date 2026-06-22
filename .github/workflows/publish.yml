@@ -1,12 +1,18 @@
 name: Publish to PyPI
 
-# Triggered when semantic-release (in ci.yml) publishes a GitHub release.
-# Builds the dist for the released tag and uploads it to PyPI via Trusted
-# Publishing (OIDC — no long-lived token). Guarded on the PUBLISH_ENABLED repo
-# variable so it is a no-op until the PyPI trusted-publisher policy exists.
+# Publishes a released tag to PyPI via Trusted Publishing (OIDC — no long-lived
+# token). Runs automatically when semantic-release (ci.yml) publishes a GitHub
+# release, and can be run on demand for an existing tag. Guarded on the
+# PUBLISH_ENABLED repo variable so it is a no-op until the PyPI trusted-publisher
+# policy exists.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)publish, e.g. v1.0.0
+        required: true
 
 jobs:
   publish:
@@ -15,18 +21,26 @@ jobs:
     environment: pypi
     permissions:
       id-token: write   # mint the OIDC token PyPI exchanges for an upload credential
+      contents: read
     steps:
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${{ github.event.release.tag_name || github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Build distribution
+      - name: Build distribution at the released version
         run: |
+          VERSION="${{ steps.tag.outputs.tag }}"
+          VERSION="${VERSION#v}"
+          python scripts/set_version.py "$VERSION"
           python -m pip install --upgrade build
           python -m build
 
