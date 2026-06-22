@@ -1,6 +1,7 @@
 # MilkyWay Payments SDK for Python
 
 [![PyPI](https://img.shields.io/pypi/v/milkyway-payments.svg?logo=pypi)](https://pypi.org/project/milkyway-payments/)
+[![Downloads](https://img.shields.io/pypi/dm/milkyway-payments.svg)](https://pypi.org/project/milkyway-payments/)
 [![CI](https://github.com/bankplanet9/milkyway-python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/bankplanet9/milkyway-python-sdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
