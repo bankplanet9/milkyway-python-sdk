@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import time
 from decimal import Decimal
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 import requests
 from urllib3.util.retry import Retry
@@ -27,6 +27,7 @@ from .exceptions import (
 )
 from .models import (
     CancelResult,
+    Destination,
     MilkywayOptions,
     PayRequest,
     PollOptions,
@@ -126,6 +127,39 @@ class MilkywayPaymentsClient:
         if not response.ok:
             raise self._to_error(response.status_code, body)
         return body
+
+    def discovery(self, country: Optional[str] = None) -> List[Destination]:
+        """List reachable destinations and their payout services.
+
+        Pass an ISO 3166-1 alpha-2 ``country`` (case-insensitive) to filter to a
+        single country; omit it to list every destination. The per-service
+        ``data`` JSON Schema is not included here — fetch it with
+        :meth:`service_schema`.
+        """
+        uri = f"{_PAYMENTS_PATH}/discovery"
+        if country:
+            uri += f"?country={requests.utils.quote(country, safe='')}"
+        response = self._send("GET", uri)
+        return self._parse(
+            response,
+            lambda b: [Destination.from_dict(d) for d in b.get("destinations") or []],
+        )
+
+    def service_schema(self, third_party_id: str, service_id: str) -> Dict[str, Any]:
+        """Return the Draft-2020 JSON Schema for a service's ``data`` field."""
+        if not (third_party_id and third_party_id.strip()):
+            raise ValueError("third_party_id is required.")
+        if not (service_id and service_id.strip()):
+            raise ValueError("service_id is required.")
+
+        uri = (
+            f"{_PAYMENTS_PATH}/discovery"
+            f"/{requests.utils.quote(third_party_id, safe='')}"
+            f"/{requests.utils.quote(service_id, safe='')}"
+            f"/schema"
+        )
+        response = self._send("GET", uri)
+        return self._parse(response, lambda b: b)
 
     def precheck(self, request: PrecheckRequest) -> PrecheckResult:
         """Quote a payment (rate + commission) without creating it."""
