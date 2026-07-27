@@ -162,6 +162,52 @@ class CancelResult:
 
 
 @dataclass
+class ServiceCapability:
+    """A payout capability a destination exposes for one service.
+
+    ``payout_currencies`` lists the currencies the service can pay out in; the
+    per-service ``data`` JSON Schema is not included in the discovery listing —
+    fetch it with :meth:`MilkywayPaymentsClient.service_schema`.
+    """
+
+    service_id: str
+    payout_method: str
+    recipient: Optional[str] = None
+    payout_currencies: Optional[list] = None
+
+    @classmethod
+    def from_dict(cls, body: Mapping[str, Any]) -> "ServiceCapability":
+        currencies = body.get("payout_currencies")
+        return cls(
+            service_id=body.get("service_id", ""),
+            payout_method=body.get("payout_method", ""),
+            recipient=body.get("recipient"),
+            payout_currencies=list(currencies) if currencies is not None else None,
+        )
+
+
+@dataclass
+class Destination:
+    """A reachable counterparty and the services it can be paid through."""
+
+    third_party_id: str
+    partner_name: Optional[str] = None
+    country: Optional[str] = None
+    services: list = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, body: Mapping[str, Any]) -> "Destination":
+        return cls(
+            third_party_id=body.get("third_party_id", ""),
+            partner_name=body.get("partner_name"),
+            country=body.get("country"),
+            services=[
+                ServiceCapability.from_dict(s) for s in body.get("services") or []
+            ],
+        )
+
+
+@dataclass
 class PollOptions:
     """Controls :meth:`MilkywayPaymentsClient.wait_for_completion` polling."""
 

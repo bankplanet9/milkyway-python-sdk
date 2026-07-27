@@ -19,12 +19,14 @@ from .exceptions import (
 )
 from .models import (
     CancelResult,
+    Destination,
     MilkywayOptions,
     PayRequest,
     PollOptions,
     PostcheckResult,
     PrecheckRequest,
     PrecheckResult,
+    ServiceCapability,
     TransactionStatus,
 )
 
@@ -38,6 +40,8 @@ __all__ = [
     "PayRequest",
     "PostcheckResult",
     "CancelResult",
+    "Destination",
+    "ServiceCapability",
     "PollOptions",
     "MilkywayApiError",
     "MilkywayValidationError",

@@ -83,6 +83,31 @@ print(f"Final status: {result.status.name}")
 `MilkywayPaymentsClient` is also a context manager (`with MilkywayPaymentsClient(...) as client:`)
 and exposes `.close()` to release its HTTP sessions.
 
+## Discovery
+
+Before quoting a payment you can discover which destinations are reachable and
+which services each one exposes. `discovery()` returns a list of `Destination`
+objects (optionally filtered by ISO 3166-1 alpha-2 `country`, case-insensitive);
+`service_schema()` returns the Draft-2020 JSON Schema that a service's `data`
+field is validated against.
+
+```python
+# List every reachable destination, or filter by country.
+for dest in client.discovery(country="TJ"):
+    print(dest.third_party_id, dest.partner_name, dest.country)
+    for svc in dest.services:
+        print("  ", svc.service_id, svc.payout_method, svc.payout_currencies)
+
+# Fetch the JSON Schema for one service's `data` field.
+schema = client.service_schema("bank-beta", "card-payout")
+print(schema["required"])
+```
+
+Each `Destination` carries `third_party_id`, optional `partner_name` / `country`,
+and a list of `ServiceCapability` (`service_id`, `payout_method`, optional
+`recipient` and `payout_currencies`). The per-service `data` schema is **not**
+included in the listing — fetch it with `service_schema` when you need it.
+
 ## The `data` field
 
 Each service requires extra per-partner fields (sender name, document number,
