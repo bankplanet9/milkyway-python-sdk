@@ -13,8 +13,10 @@ from typing import Optional
 class MilkywayApiError(Exception):
     """Base error for all failures returned by the MilkyWay Payments API.
 
-    Carries the HTTP ``status_code`` (``0`` when the request never completed) and
-    the raw ``response_body`` for diagnostics.
+    Carries the HTTP ``status_code`` (``0`` when the request never completed),
+    the raw ``response_body`` for diagnostics, and, on a field-level 400, the
+    ``field`` at fault by its JSON name or path (e.g. ``amount_credit``,
+    ``sender_info.date_of_birth``).
     """
 
     def __init__(
@@ -22,21 +24,31 @@ class MilkywayApiError(Exception):
         status_code: int,
         message: str,
         response_body: Optional[str] = None,
+        field: Optional[str] = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.message = message
         self.response_body = response_body
+        self.field = field
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"[{self.status_code}] {self.message}"
 
 
 class MilkywayValidationError(MilkywayApiError):
-    """HTTP 400 — request validation failed (bad amount, missing field, unresolvable FX rate)."""
+    """HTTP 400 — request validation failed (bad amount, missing field, unresolvable FX rate).
 
-    def __init__(self, message: str, response_body: Optional[str] = None) -> None:
-        super().__init__(400, message, response_body)
+    ``field`` names the request field at fault when the server reports one.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        response_body: Optional[str] = None,
+        field: Optional[str] = None,
+    ) -> None:
+        super().__init__(400, message, response_body, field)
 
 
 class MilkywayAuthError(MilkywayApiError):
