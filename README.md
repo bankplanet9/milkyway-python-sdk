@@ -174,8 +174,10 @@ banks, services, party profiles and `data` fields is the
 ## Errors
 
 All API errors raise a subclass of `MilkywayApiError` (carrying `status_code`,
-`message`, the raw `response_body`, and `error_code` — the body's `error` code
-verbatim, e.g. `ErrPaymentRejected`). On a field-level 400, `field` names the
+`message`, the raw `response_body`, and `error_code` — the leading `Err…` word
+of the message, e.g. `ErrPaymentRejected`, or `ErrValidationFailed` from
+`ErrValidationFailed: amount_credit: …`; `None` when the message does not start
+with one). On a field-level 400, `field` names the
 request field at fault — e.g. `amount_credit`, `currency_credit`, `recipient_id`
 (the recipient bank reports the recipient invalid), or a party field by its path
 such as `sender_info.date_of_birth`:

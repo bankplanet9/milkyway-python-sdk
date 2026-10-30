@@ -8,7 +8,10 @@ present.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Optional
+
+_ERROR_CODE = re.compile(r"Err[A-Za-z0-9_]*")
 
 
 def _error_document(body: Optional[str]) -> Dict[str, Any]:
@@ -21,6 +24,15 @@ def _error_document(body: Optional[str]) -> Dict[str, Any]:
     return doc if isinstance(doc, dict) else {}
 
 
+def _error_code(message: str) -> Optional[str]:
+    """The leading ``Err...`` word of a server error message, or ``None``.
+
+    ``"ErrValidationFailed: amount_credit: ..."`` yields ``"ErrValidationFailed"``.
+    """
+    code = message.split(":", 1)[0].strip()
+    return code if _ERROR_CODE.fullmatch(code) else None
+
+
 def _string_member(doc: Dict[str, Any], key: str) -> Optional[str]:
     value = doc.get(key)
     return value if isinstance(value, str) else None
@@ -30,9 +42,11 @@ class MilkywayApiError(Exception):
     """Base error for all failures returned by the MilkyWay Payments API.
 
     Carries the HTTP ``status_code`` (``0`` when the request never completed),
-    the raw ``response_body`` for diagnostics, ``error_code`` (the ``error``
-    member of a JSON error body verbatim, e.g. ``ErrPaymentRejected``; ``None``
-    when the body has none), and, on a field-level 400, the ``field`` at fault by
+    the raw ``response_body`` for diagnostics, ``error_code`` (the leading
+    ``Err...`` word of the server's message, e.g. ``ErrPaymentRejected`` or
+    ``ErrValidationFailed`` from ``"ErrValidationFailed: amount_credit: ..."``;
+    ``None`` when the message does not start with one — the full text stays in
+    ``message``), and, on a field-level 400, the ``field`` at fault by
     its JSON name or path (e.g. ``amount_credit``, ``recipient_id``,
     ``sender_info.date_of_birth``).
     """
@@ -49,7 +63,7 @@ class MilkywayApiError(Exception):
         self.message = message
         self.response_body = response_body
         self.field = field
-        self.error_code = _string_member(_error_document(response_body), "error")
+        self.error_code = _error_code(message)
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"[{self.status_code}] {self.message}"

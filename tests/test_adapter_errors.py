@@ -201,3 +201,32 @@ def test_postcheck_error_is_a_plain_string_code(options, token_body, code):
     assert type(result.error) is str
     assert result.error == code
     assert (result.error == StatusReason.RECIPIENT_NOT_FOUND) == (code == "ErrRecipientNotFound")
+
+
+@pytest.mark.parametrize(
+    "message, code",
+    [
+        ("ErrPaymentRejected", "ErrPaymentRejected"),
+        ("ErrValidationFailed: amount_credit: not a decimal", "ErrValidationFailed"),
+        (
+            "ErrRecipientRateUnavailable: receiving bank quoted no usable FX rate for USD->TJS: ErrServiceUnavailable",
+            "ErrRecipientRateUnavailable",
+        ),
+        ("third_party_id_credit is required", None),
+        ("Error happened", None),
+        ("ErrFoo bar: baz", None),
+    ],
+)
+@responses.activate
+def test_error_code_is_the_leading_err_word(options, token_body, message, code):
+    client = _client(options, token_body)
+    responses.add(
+        responses.GET,
+        f"{BASE_URL}/payments/v1/postcheck",
+        json={"error": message},
+        status=400,
+    )
+    with pytest.raises(MilkywayValidationError) as info:
+        client.postcheck(1)
+    assert info.value.error_code == code
+    assert info.value.message == message
