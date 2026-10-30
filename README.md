@@ -15,7 +15,7 @@ Batteries included:
   refresh ~30s before expiry, single-flight acquisition, and a one-shot
   refresh-and-replay on `401`.
 - **Retries** (exponential backoff + jitter via `urllib3`) on transient failures
-  (5xx, 408, network), with deterministic errors (400/401/402/404) never retried.
+  (5xx, 408, network), with deterministic errors (400/401/402/404/422) never retried.
 - **Typed models & exceptions** — money is `decimal.Decimal` (parsed losslessly
   from JSON numbers), status is an `IntEnum`, the payer and beneficiary are typed
   `PartyInfo` dataclasses, and each HTTP error maps to a specific exception type.
@@ -174,17 +174,57 @@ banks, services, party profiles and `data` fields is the
 ## Errors
 
 All API errors raise a subclass of `MilkywayApiError` (carrying `status_code`,
-`message`, and the raw `response_body`). On a field-level 400, `field` names the
-request field at fault — e.g. `amount_credit`, or a party field by its path such
-as `sender_info.date_of_birth`:
+`message`, the raw `response_body`, and `error_code` — the body's `error` code
+verbatim, e.g. `ErrPaymentRejected`). On a field-level 400, `field` names the
+request field at fault — e.g. `amount_credit`, `currency_credit`, `recipient_id`
+(the recipient bank reports the recipient invalid), or a party field by its path
+such as `sender_info.date_of_birth`:
 
 | HTTP | Exception | Meaning |
 | --- | --- | --- |
-| 400 | `MilkywayValidationError` | Bad request (invalid amount, missing field). |
+| 400 | `MilkywayValidationError` | Bad request (invalid amount, missing field, recipient invalid). |
 | 401 | `MilkywayAuthError` | Token missing/invalid (also raised if token acquisition fails). |
 | 402 | `MilkywayExposureBlockedError` | Payment would breach a block-action exposure limit. |
 | 404 | `MilkywayNotFoundError` | Transaction not found or not owned by your institution. |
-| 5xx | `MilkywayServiceUnavailableError` | API or downstream recipient unavailable, or the recipient bank quoted no usable FX rate for a cross-currency payment (retried automatically first). |
+| 422 | `MilkywayPaymentRejectedError` | The recipient bank refused the payment on its merits (`precheck`, `pay`). Not retryable; nothing was created. |
+| 502 | `MilkywayRecipientBankError` | The recipient bank's connector failed unclassifiably (`precheck`, `pay`, `cancel`). Nothing was created; retry later or use another service. Subclass of `MilkywayServiceUnavailableError`. |
+| 5xx | `MilkywayServiceUnavailableError` | API or downstream recipient unavailable, or the recipient bank quoted no usable FX rate for a cross-currency payment. On a 503, `service_id` and `third_party_id` name the service that failed. |
+
+5xx errors (including 502) are retried automatically first; 4xx errors (including
+422) never are.
+
+```python
+from milkyway_payments import (
+    MilkywayPaymentRejectedError,
+    MilkywayServiceUnavailableError,
+)
+
+try:
+    tx_id = client.pay(pay_request, idempotency_key=key)
+except MilkywayPaymentRejectedError:
+    ...  # the recipient bank said no: do not resend
+except MilkywayServiceUnavailableError as ex:  # also catches MilkywayRecipientBankError
+    ...  # transient: retry later with the same idempotency_key
+```
+
+A failed payment's `PostcheckResult.error` is a reason **code**, never the bank's
+own text. It stays a plain `str`; compare it against the `StatusReason` constants:
+
+| `StatusReason` | Code |
+| --- | --- |
+| `PAYMENT_REJECTED` | `ErrPaymentRejected` — the bank declined (also any reason given without a code) |
+| `RECIPIENT_NOT_FOUND` | `ErrRecipientNotFound` |
+| `RECIPIENT_INVALID` | `ErrRecipientInvalid` |
+| `SERVICE_UNAVAILABLE` | `ErrServiceUnavailable` |
+| `PAYMENT_CANNOT_BE_CANCELED` | `ErrPaymentCannotBeCanceled` |
+
+```python
+from milkyway_payments import StatusReason, TransactionStatus
+
+result = client.wait_for_completion(tx_id)
+if result.status is TransactionStatus.FAILED and result.error == StatusReason.RECIPIENT_NOT_FOUND:
+    ...
+```
 
 ## Retries & idempotency
 

@@ -14,6 +14,8 @@ from .exceptions import (
     MilkywayAuthError,
     MilkywayExposureBlockedError,
     MilkywayNotFoundError,
+    MilkywayPaymentRejectedError,
+    MilkywayRecipientBankError,
     MilkywayServiceUnavailableError,
     MilkywayValidationError,
 )
@@ -35,6 +37,7 @@ from .models import (
     PrecheckRequest,
     PrecheckResult,
     ServiceCapability,
+    StatusReason,
     TransactionStatus,
 )
 
@@ -43,6 +46,7 @@ __all__ = [
     "MilkywayOptions",
     "KeycloakTokenProvider",
     "TransactionStatus",
+    "StatusReason",
     "PrecheckRequest",
     "PrecheckResult",
     "PayRequest",
@@ -64,7 +68,9 @@ __all__ = [
     "MilkywayAuthError",
     "MilkywayExposureBlockedError",
     "MilkywayNotFoundError",
+    "MilkywayPaymentRejectedError",
     "MilkywayServiceUnavailableError",
+    "MilkywayRecipientBankError",
 ]
 
 __version__ = "0.0.0"
