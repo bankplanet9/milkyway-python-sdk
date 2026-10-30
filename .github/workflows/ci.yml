@@ -49,6 +49,7 @@ jobs:
       contents: write       # create git tags + GitHub releases
       issues: write         # semantic-release comments on resolved issues/PRs
       pull-requests: write
+      actions: write        # dispatch publish.yml for the new tag (403 without it)
     steps:
       - uses: actions/checkout@v4
         with:
