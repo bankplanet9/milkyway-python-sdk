@@ -161,11 +161,11 @@ def test_pay_includes_data_when_present(options, token_body):
             recipient_id="r",
             amount_credit=Decimal("1"),
             currency_credit="USD",
-            data={"passport": "AA1234567"},
+            data={"extra": "value"},
         )
     )
     sent = json.loads(responses.calls[-1].request.body)
-    assert sent["data"] == {"passport": "AA1234567"}
+    assert sent["data"] == {"extra": "value"}
 
 
 @responses.activate

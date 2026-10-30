@@ -132,8 +132,10 @@ class MilkywayPaymentsClient:
         """List reachable destinations and their payout services.
 
         Pass an ISO 3166-1 alpha-2 ``country`` (case-insensitive) to filter to a
-        single country; omit it to list every destination. The per-service
-        ``data`` JSON Schema is not included here — fetch it with
+        single country; omit it to list every destination. Each service's
+        ``party_profile`` says which ``sender_info`` / ``recipient_info`` fields
+        its recipient bank requires. The JSON Schema of a service's non-identity
+        ``data`` extras is not included here — fetch it with
         :meth:`service_schema`.
         """
         uri = f"{_PAYMENTS_PATH}/discovery"
@@ -146,7 +148,7 @@ class MilkywayPaymentsClient:
         )
 
     def service_schema(self, third_party_id: str, service_id: str) -> Dict[str, Any]:
-        """Return the Draft-2020 JSON Schema for a service's ``data`` field."""
+        """Return the Draft-2020 JSON Schema of a service's non-identity ``data`` extras."""
         if not (third_party_id and third_party_id.strip()):
             raise ValueError("third_party_id is required.")
         if not (service_id and service_id.strip()):
@@ -303,7 +305,7 @@ class MilkywayPaymentsClient:
     def _to_error(self, status: int, body: str) -> MilkywayApiError:
         message = self._extract_error_message(body) or f"Request failed with status {status}."
         if status == 400:
-            return MilkywayValidationError(message, body)
+            return MilkywayValidationError(message, body, self._extract_error_field(body))
         if status == 401:
             return MilkywayAuthError(message, body)
         if status == 402:
@@ -327,4 +329,16 @@ class MilkywayPaymentsClient:
             err = doc.get("error")
             if isinstance(err, str):
                 return err
+        return None
+
+    @staticmethod
+    def _extract_error_field(body: str) -> Optional[str]:
+        try:
+            doc = json.loads(body)
+        except ValueError:
+            return None
+        if isinstance(doc, dict):
+            field = doc.get("field")
+            if isinstance(field, str):
+                return field
         return None

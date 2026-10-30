@@ -17,8 +17,8 @@ Batteries included:
 - **Retries** (exponential backoff + jitter via `urllib3`) on transient failures
   (5xx, 408, network), with deterministic errors (400/401/402/404) never retried.
 - **Typed models & exceptions** — money is `decimal.Decimal` (parsed losslessly
-  from JSON numbers), status is an `IntEnum`, and each HTTP error maps to a
-  specific exception type.
+  from JSON numbers), status is an `IntEnum`, the payer and beneficiary are typed
+  `PartyInfo` dataclasses, and each HTTP error maps to a specific exception type.
 - **Idempotency-key passthrough** on `pay` (a `pay` without a key is sent exactly
   once — never auto-retried).
 - A **`wait_for_completion`** polling helper with exponential backoff and a
@@ -38,9 +38,11 @@ ready.
 ## Quick start
 
 ```python
+from datetime import date
 from decimal import Decimal
 from milkyway_payments import (
     MilkywayPaymentsClient, MilkywayOptions, PrecheckRequest, PayRequest,
+    PartyInfo, PartyName, PartyType, IdentityDocumentType,
 )
 
 client = MilkywayPaymentsClient(MilkywayOptions(
@@ -53,6 +55,17 @@ client = MilkywayPaymentsClient(MilkywayOptions(
 # 1. Is the recipient bank's service online?
 client.healthcheck("bank-beta", "card-payout")
 
+# The payer and the beneficiary, in the canonical model. The service's
+# `party_profile` from discovery says which fields its recipient bank requires.
+sender = PartyInfo(
+    party_type=PartyType.NATURAL,
+    name=PartyName(first="Ivan", last="Petrov", full="Petrov Ivan Sergeevich"),
+    date_of_birth=date(1990, 4, 18),
+    identity_document_type=IdentityDocumentType.PASSPORT,
+    identity_document_number="AB1234567",
+)
+recipient = PartyInfo(party_type=PartyType.NATURAL, name=PartyName(full="Karimov Ali"))
+
 # 2. Quote the payment (FX markup + commission applied here).
 quote = client.precheck(PrecheckRequest(
     third_party_id_debit="bank-beta",
@@ -60,6 +73,8 @@ quote = client.precheck(PrecheckRequest(
     recipient_id="recipient-9999",
     amount_credit=Decimal("100.00"),
     currency_credit="USD",
+    sender_info=sender,
+    recipient_info=recipient,
 ))
 print(f"Rate {quote.rate}, debit {quote.amount_debit} {quote.currency_debit}, commission {quote.commission}")
 
@@ -72,7 +87,8 @@ transaction_id = client.pay(PayRequest(
     recipient_id="recipient-9999",
     amount_credit=Decimal("100.00"),
     currency_credit="USD",
-    data={"passport": "AA1234567"},
+    sender_info=sender,
+    recipient_info=recipient,
 ), idempotency_key=str(uuid.uuid4()))
 
 # 4. Poll until the payment reaches a terminal status.
@@ -88,8 +104,8 @@ and exposes `.close()` to release its HTTP sessions.
 Before quoting a payment you can discover which destinations are reachable and
 which services each one exposes. `discovery()` returns a list of `Destination`
 objects (optionally filtered by ISO 3166-1 alpha-2 `country`, case-insensitive);
-`service_schema()` returns the Draft-2020 JSON Schema that a service's `data`
-field is validated against.
+`service_schema()` returns the Draft-2020 JSON Schema of a service's non-identity
+`data` extras.
 
 ```python
 # List every reachable destination, or filter by country.
@@ -97,38 +113,78 @@ for dest in client.discovery(country="TJ"):
     print(dest.third_party_id, dest.partner_name, dest.country)
     for svc in dest.services:
         print("  ", svc.service_id, svc.payout_method, svc.payout_currencies)
+        profile = svc.party_profile
+        if profile and profile.sender_info:
+            print("   sender needs", profile.sender_info.required)
 
-# Fetch the JSON Schema for one service's `data` field.
+# Fetch the JSON Schema of one service's non-identity `data` extras.
 schema = client.service_schema("bank-beta", "card-payout")
-print(schema["required"])
+print(schema.get("properties"))
 ```
 
 Each `Destination` carries `third_party_id`, optional `partner_name` / `country`,
 and a list of `ServiceCapability` (`service_id`, `payout_method`, optional
-`recipient` and `payout_currencies`). The per-service `data` schema is **not**
-included in the listing — fetch it with `service_schema` when you need it.
+`recipient`, `payout_currencies` and `party_profile`). `party_profile` says which
+`sender_info` / `recipient_info` fields the recipient bank requires and accepts
+(see [Payer and beneficiary](#payer-and-beneficiary)). The per-service `data`
+schema is **not** included in the listing — fetch it with `service_schema` when
+you need it.
 
-## The `data` field
+## Payer and beneficiary
 
-Each service requires extra per-partner fields (sender name, document number,
-birthday, …) in the `data` dictionary. **Which keys are required depends on your
-`service_id` and the recipient bank** — look them up in the Услуги registry. The
-server validates `data` against the service's JSON Schema during precheck, so a
-missing field is rejected before any money moves. Omit `data` (leave it `None`)
-and it is not sent on the wire.
+The identity of your customer (the payer) and of the beneficiary travels in
+`sender_info` and `recipient_info` on `PrecheckRequest` and `PayRequest` — two
+`PartyInfo` objects in one canonical model (FATF Travel Rule / ISO 20022 /
+IVMS101), the same for every recipient bank and service. You map your customer
+data to it once; each bank's connector converts it to that bank's own format.
+The account, card or phone stays in `sender_id` / `recipient_id`.
+
+| Field | Format |
+| --- | --- |
+| `party_type` | `PartyType.NATURAL` (required). `PartyType.LEGAL` exists in the model but the API refuses it for now. |
+| `name` | `PartyName(first, last, full)`, text. `full` is the name as in the document, family name first, with a patronymic if any. |
+| `date_of_birth` | A `datetime.date`, or an ISO 8601 `YYYY-MM-DD` string. |
+| `identity_document_type` | `IdentityDocumentType.PASSPORT`, `NATIONAL_ID`, `DRIVER_LICENSE`, `RESIDENCE_PERMIT`, `TAX_ID`, `SOCIAL_SECURITY` or `OTHER`. Required with `identity_document_number`. |
+| `identity_document_number` | Series and number together, as in the document. |
+| `identity_document_country`, `country_of_residence` | ISO 3166-1 alpha-2, upper case (`"TJ"`). |
+| `address` | `PartyAddress(country, city, street, building, postal_code, line)` — `country` (alpha-2) is required when an address is sent; `line` holds up to 7 free-text lines. |
+
+Every field except `party_type` is optional; empty fields (and an empty `name`
+or `address`) are left out of the request. Text values are at most 256
+characters.
+
+Which fields a service needs is set by its recipient bank and published as the
+service's `party_profile` in `discovery()`: `required` and `accepted` field paths
+(`"name.first"`, `"date_of_birth"`, … — see `PartyFieldPath`) for each side, and,
+when the bank takes only some document kinds, `identity_document_types`. Send the
+fields you have; fields the bank does not use are ignored. A missing required
+field or an invalid value raises `MilkywayValidationError` whose `field` names it
+by its path (e.g. `sender_info.date_of_birth`).
+
+## Service-specific extras (the `data` field)
+
+**Never put identity in `data`** (no sender name, birthday, passport or document
+number there) — the API does not read it from `data`. `data` carries only what a
+service needs beyond the parties; most services take no `data` fields. When one
+does, `service_schema()` returns its JSON Schema. The browsable registry of
+banks, services, party profiles and `data` fields is the
+[MilkyWay Handbook](https://docs.planet9.ae/site/milkyway-handbook/en/) (section
+**Services**). Omit `data` (leave it `None`) and it is not sent on the wire.
 
 ## Errors
 
 All API errors raise a subclass of `MilkywayApiError` (carrying `status_code`,
-`message`, and the raw `response_body`):
+`message`, and the raw `response_body`). On a field-level 400, `field` names the
+request field at fault — e.g. `amount_credit`, or a party field by its path such
+as `sender_info.date_of_birth`:
 
 | HTTP | Exception | Meaning |
 | --- | --- | --- |
-| 400 | `MilkywayValidationError` | Bad request (invalid amount, missing field, unresolvable FX rate). |
+| 400 | `MilkywayValidationError` | Bad request (invalid amount, missing field). |
 | 401 | `MilkywayAuthError` | Token missing/invalid (also raised if token acquisition fails). |
 | 402 | `MilkywayExposureBlockedError` | Payment would breach a block-action exposure limit. |
 | 404 | `MilkywayNotFoundError` | Transaction not found or not owned by your institution. |
-| 5xx | `MilkywayServiceUnavailableError` | API or downstream recipient unavailable (retried automatically first). |
+| 5xx | `MilkywayServiceUnavailableError` | API or downstream recipient unavailable, or the recipient bank quoted no usable FX rate for a cross-currency payment (retried automatically first). |
 
 ## Retries & idempotency
 
