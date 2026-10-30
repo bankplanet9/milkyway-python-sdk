@@ -22,6 +22,8 @@ from .exceptions import (
     MilkywayAuthError,
     MilkywayExposureBlockedError,
     MilkywayNotFoundError,
+    MilkywayPaymentRejectedError,
+    MilkywayRecipientBankError,
     MilkywayServiceUnavailableError,
     MilkywayValidationError,
 )
@@ -164,7 +166,12 @@ class MilkywayPaymentsClient:
         return self._parse(response, lambda b: b)
 
     def precheck(self, request: PrecheckRequest) -> PrecheckResult:
-        """Quote a payment (rate + commission) without creating it."""
+        """Quote a payment (rate + commission) without creating it.
+
+        Raises :class:`MilkywayPaymentRejectedError` (422) when the recipient bank
+        refuses the payment, and :class:`MilkywayRecipientBankError` (502) when its
+        connector fails unclassifiably.
+        """
         response = self._send(
             "POST",
             f"{_PAYMENTS_PATH}/precheck",
@@ -181,6 +188,10 @@ class MilkywayPaymentsClient:
 
         Without an ``idempotency_key`` the request is sent exactly once (no
         auto-retry) so a retry cannot create a duplicate payment.
+
+        Raises :class:`MilkywayPaymentRejectedError` (422) when the recipient bank
+        refuses the payment, and :class:`MilkywayRecipientBankError` (502) when its
+        connector fails unclassifiably; nothing is created in either case.
         """
         headers = {}
         if idempotency_key:
@@ -203,7 +214,12 @@ class MilkywayPaymentsClient:
         return self._parse(response, PostcheckResult.from_dict)
 
     def cancel(self, transaction_id: int) -> CancelResult:
-        """Request cancellation of a transaction owned by your institution."""
+        """Request cancellation of a transaction owned by your institution.
+
+        Raises :class:`MilkywayServiceUnavailableError` (503) when the recipient
+        bank cannot be reached and :class:`MilkywayRecipientBankError` (502) when
+        its connector fails otherwise; the payment is unchanged in both cases.
+        """
         response = self._send(
             "POST",
             f"{_PAYMENTS_PATH}/cancel",
@@ -312,6 +328,10 @@ class MilkywayPaymentsClient:
             return MilkywayExposureBlockedError(message, body)
         if status == 404:
             return MilkywayNotFoundError(message, body)
+        if status == 422:
+            return MilkywayPaymentRejectedError(message, body)
+        if status == 502:
+            return MilkywayRecipientBankError(message, body)
         if status >= 500:
             return MilkywayServiceUnavailableError(status, message, body)
         return MilkywayApiError(status, message, body)

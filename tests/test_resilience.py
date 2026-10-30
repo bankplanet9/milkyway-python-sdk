@@ -15,9 +15,12 @@ import pytest
 from milkyway_payments import (
     MilkywayExposureBlockedError,
     MilkywayOptions,
+    MilkywayPaymentRejectedError,
     MilkywayPaymentsClient,
+    MilkywayRecipientBankError,
     MilkywayServiceUnavailableError,
     PayRequest,
+    PrecheckRequest,
 )
 
 
@@ -159,6 +162,71 @@ def test_pay_with_key_is_retried(server):
     )
     assert tx == 77
     assert recorder.hits["/payments/v1"] == 2  # retried with the key
+
+
+def _pay_request() -> PayRequest:
+    return PayRequest(
+        third_party_id_debit="b",
+        service_id="s",
+        sender_id="snd",
+        recipient_id="r",
+        amount_credit=Decimal("1"),
+        currency_credit="USD",
+    )
+
+
+def test_no_retry_on_422(server):
+    recorder, base = server
+    recorder.program("/token", [(200, '{"access_token":"t","expires_in":300}')])
+    recorder.program("/payments/v1", [(422, '{"error":"ErrPaymentRejected"}')])
+    client = MilkywayPaymentsClient(_options(base))
+
+    with pytest.raises(MilkywayPaymentRejectedError):
+        client.pay(_pay_request(), idempotency_key="idem-422")
+    assert recorder.hits["/payments/v1"] == 1  # deterministic, not retried even with a key
+
+
+def test_502_is_retried_then_raises_recipient_bank_error(server):
+    recorder, base = server
+    recorder.program("/token", [(200, '{"access_token":"t","expires_in":300}')])
+    recorder.program("/payments/v1/precheck", [(502, '{"error":"ErrRecipientBankError"}')])
+    client = MilkywayPaymentsClient(_options(base))
+
+    with pytest.raises(MilkywayRecipientBankError):
+        client.precheck(
+            PrecheckRequest(
+                third_party_id_debit="b",
+                service_id="s",
+                recipient_id="r",
+                amount_credit=Decimal("1"),
+                currency_credit="USD",
+            )
+        )
+    assert recorder.hits["/payments/v1/precheck"] == 4  # first attempt + max_retries
+
+
+def test_502_then_success_is_retried(server):
+    recorder, base = server
+    recorder.program("/token", [(200, '{"access_token":"t","expires_in":300}')])
+    recorder.program(
+        "/payments/v1/cancel",
+        [(502, '{"error":"ErrRecipientBankError"}'), (200, '{"status":2}')],
+    )
+    client = MilkywayPaymentsClient(_options(base))
+    assert client.cancel(9).status == 2
+    assert recorder.hits["/payments/v1/cancel"] == 2
+
+
+def test_pay_without_key_502_is_not_retried(server):
+    recorder, base = server
+    recorder.program("/token", [(200, '{"access_token":"t","expires_in":300}')])
+    recorder.program("/payments/v1", [(502, '{"error":"ErrRecipientBankError"}')])
+    client = MilkywayPaymentsClient(_options(base))
+
+    with pytest.raises(MilkywayServiceUnavailableError) as info:
+        client.pay(_pay_request())
+    assert isinstance(info.value, MilkywayRecipientBankError)
+    assert recorder.hits["/payments/v1"] == 1  # sent exactly once (duplicate-safety)
 
 
 def test_validate_rejects_missing_fields(server):

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from enum import Enum, IntEnum
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Final, List, Mapping, Optional, Sequence, Union
 
 
 class TransactionStatus(IntEnum):
@@ -35,6 +35,27 @@ class TransactionStatus(IntEnum):
             TransactionStatus.FAILED,
             TransactionStatus.STUCK,
         )
+
+
+class StatusReason:
+    """Codes of the recipient bank's reason in :attr:`PostcheckResult.error`.
+
+    ``PostcheckResult.error`` stays a plain ``str`` so codes added later still
+    parse; compare it against these constants::
+
+        if result.error == StatusReason.PAYMENT_REJECTED: ...
+    """
+
+    PAYMENT_REJECTED: Final = "ErrPaymentRejected"
+    """The bank declined the payment (also any reason it gave without a code)."""
+    RECIPIENT_NOT_FOUND: Final = "ErrRecipientNotFound"
+    """The bank does not know the recipient."""
+    RECIPIENT_INVALID: Final = "ErrRecipientInvalid"
+    """The bank reports the recipient invalid."""
+    SERVICE_UNAVAILABLE: Final = "ErrServiceUnavailable"
+    """The bank's service was unavailable."""
+    PAYMENT_CANNOT_BE_CANCELED: Final = "ErrPaymentCannotBeCanceled"
+    """The bank refused to cancel the payment."""
 
 
 class PartyType(str, Enum):
@@ -360,7 +381,12 @@ class PrecheckResult:
 
 @dataclass
 class PostcheckResult:
-    """Current status of a payment transaction."""
+    """Current status of a payment transaction.
+
+    ``error`` is the code of the recipient bank's reason for a terminal outcome,
+    when it gave one — one of the :class:`StatusReason` constants, never the
+    bank's own text. ``None`` when no reason was given.
+    """
 
     transaction_id: int
     status: TransactionStatus
